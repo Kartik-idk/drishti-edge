@@ -1,0 +1,1 @@
+# This file preserves the data/videos directory structure in Git while actual video files (*.mp4, etc.) are excluded by .gitignore.

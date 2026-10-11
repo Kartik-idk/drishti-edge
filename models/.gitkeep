@@ -1,0 +1,1 @@
+# This file preserves the models directory structure in Git while binary weight files (*.pt, *.onnx, etc.) are excluded by .gitignore.

@@ -1,0 +1,99 @@
+# ==============================================================================
+# Drishti-Edge .gitignore
+# Privacy-Preserving Urban Safety Auditing Prototype
+# ==============================================================================
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Environment variables, credentials, and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+
+# Streamlit secrets and runtime configuration
+.streamlit/secrets.toml
+
+# Testing, type checking, and linting
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Log files and runtime diagnostics
+*.log
+logs/
+
+# SQLite databases and journal files
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Raw and processed video files (Strictly ignored for privacy and repository size)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv
+*.flv
+*.webm
+*.m4v
+
+# Data directories (keep directory structure via .gitkeep)
+data/videos/*
+!data/videos/.gitkeep
+data/raw_videos/*
+!data/raw_videos/.gitkeep
+data/output/*
+!data/output/.gitkeep
+
+# Machine learning model weights, checkpoints, and export binaries
+*.pt
+*.pth
+*.onnx
+*.engine
+*.tflite
+*.weights
+*.bin
+models/*
+!models/.gitkeep
+
+# YOLO / Ultralytics execution outputs and benchmarks
+runs/
+/results/
+/reports/
+/output/
+/outputs/
+/output_videos/
+/annotated_videos/
+
+# Operating system and editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

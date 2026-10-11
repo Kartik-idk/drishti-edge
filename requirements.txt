@@ -1,0 +1,14 @@
+# Core Dependencies for Drishti-Edge
+# Seva First Innovation Challenge
+
+# Computer Vision and Edge Inference
+opencv-python-headless>=4.8.0
+ultralytics>=8.0.0
+
+# User Interface and Interactive Dashboard
+streamlit>=1.30.0
+
+# Environment Configuration and Utilities
+python-dotenv>=1.0.0
+
+# SQLite is part of the Python Standard Library (sqlite3), no external package required.
