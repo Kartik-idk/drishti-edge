@@ -2,7 +2,7 @@
 # Seva First Innovation Challenge
 
 # Computer Vision and Edge Inference
-opencv-python-headless>=4.8.0
+opencv-python>=4.8.0
 ultralytics>=8.0.0
 
 # User Interface and Interactive Dashboard
