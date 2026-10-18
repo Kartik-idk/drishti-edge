@@ -15,6 +15,7 @@ Core Responsibilities:
 """
 
 from dataclasses import dataclass, field
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import cv2
@@ -24,6 +25,25 @@ import numpy as np
 CANONICAL_WIDTH = 1280
 CANONICAL_HEIGHT = 720
 GRID_ROWS = 3
+
+__all__ = [
+    "CANONICAL_WIDTH",
+    "CANONICAL_HEIGHT",
+    "GRID_ROWS",
+    "GRID_COLS",
+    "TOTAL_ZONES",
+    "ZONE_DEFINITIONS",
+    "SpatialZoneMapper",
+    "calculate_expected_evaluated_frames",
+    "calculate_mobility_factor",
+    "calculate_zone_lighting_deficit",
+    "compute_box_zone_overlap",
+    "compute_zvi",
+    "discover_local_videos",
+    "get_video_metadata",
+    "map_box_to_zone",
+    "map_point_to_zone",
+]
 
 
 def discover_local_videos(videos_dir: Optional[Path] = None) -> List[Path]:
@@ -68,6 +88,59 @@ def get_video_metadata(video_path: Path) -> Optional[Dict[str, Any]]:
         "duration_sec": round(duration_sec, 2),
         "size_mb": round(video_path.stat().st_size / (1024 * 1024), 2),
     }
+
+
+def calculate_expected_evaluated_frames(
+    total_frames: int,
+    stride: int,
+    audit_mode: str = "full",
+    max_frames: Optional[int] = None,
+) -> int:
+    """Calculate the expected number of evaluated frames for a video audit.
+
+    For a video with N source frames sampled starting at frame 0 with stride S:
+      expected_full = ceil(N / S) = (N + S - 1) // S (for N > 0, S > 0)
+    In quick mode, it is capped by max_frames:
+      expected_quick = min(max_frames, expected_full)
+
+    Args:
+        total_frames: Total number of frames in the source video (N >= 0).
+        stride: Sampling stride (S >= 1).
+        audit_mode: "quick" or "full".
+        max_frames: Upper bound for quick audit mode (default: 300).
+
+    Returns:
+        Expected number of evaluated frames (>= 0).
+    """
+    if total_frames is None or stride is None:
+        return 0
+
+    try:
+        n_frames = int(total_frames)
+        s_stride = int(stride)
+    except (ValueError, TypeError):
+        return 0
+
+    if n_frames <= 0 or s_stride <= 0:
+        return 0
+
+    full_count = (n_frames + s_stride - 1) // s_stride
+
+    mode_str = str(audit_mode).lower() if audit_mode is not None else "full"
+    if mode_str.startswith("quick"):
+        if max_frames is None:
+            cap = 300
+        else:
+            try:
+                cap = int(max_frames)
+            except (ValueError, TypeError):
+                cap = 300
+        return min(max(0, cap), full_count)
+
+    return full_count
+
+
+GRID_ROWS = 3
 GRID_COLS = 3
 TOTAL_ZONES = GRID_ROWS * GRID_COLS
 
