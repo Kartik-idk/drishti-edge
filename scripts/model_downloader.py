@@ -66,11 +66,11 @@ REQUIRED_MODELS: Dict[str, Dict[str, Any]] = {
 }
 
 CANONICAL_DEMO_VIDEO = {
-    "filename": "synthetic_test.mp4",
-    "relative_path": "data/videos/synthetic_test.mp4",
-    "sha256": "57e2fdb49b78352ee4bc4f0ac8d27d659e6bb1ab55a453e3760881a0e05b935c",
-    "expected_bytes": 1678077,
-    "description": "Procedural 720p simulation (150 frames, 5s @ 30fps)",
+    "filename": "india_street_demo.mp4",
+    "relative_path": "data/videos/india_street_demo.mp4",
+    "sha256": "6449b5bddf8971f280dfa14ad50e03f66f080b5d1406f33bd6e0b34b45ba077b",
+    "expected_bytes": 5560413,
+    "description": "Indian street footage demonstration clip (240 frames, 8.0s @ 30 FPS, Pexels licensed)",
 }
 
 
@@ -246,21 +246,26 @@ def ensure_models_available(
 
 
 def ensure_demo_video_available(project_root: Optional[Path] = None) -> Path:
-    """Ensure that the canonical demonstration video synthetic_test.mp4 exists.
+    """Ensure that the canonical demonstration video exists.
 
-    If missing from data/videos/, generates it procedurally using the
-    benchmark synthetic video generator to guarantee that the demo
-    never fails to mount in cloud container environments.
+    Returns the path to data/videos/india_street_demo.mp4 if present.
+    If missing, falls back to data/videos/synthetic_test.mp4 (generating it
+    procedurally if missing) to guarantee that demonstration workflows
+    never crash on uninitialized test environments.
     """
     if project_root is None:
         project_root = Path(__file__).resolve().parent.parent
 
-    video_path = project_root / CANONICAL_DEMO_VIDEO["relative_path"]
-    if video_path.is_file() and video_path.stat().st_size > 0:
-        return video_path
+    demo_path = project_root / CANONICAL_DEMO_VIDEO["relative_path"]
+    if demo_path.is_file() and demo_path.stat().st_size > 0:
+        return demo_path
 
-    video_path.parent.mkdir(parents=True, exist_ok=True)
+    fallback_path = project_root / "data" / "videos" / "synthetic_test.mp4"
+    if fallback_path.is_file() and fallback_path.stat().st_size > 0:
+        return fallback_path
+
+    fallback_path.parent.mkdir(parents=True, exist_ok=True)
     from scripts.benchmark_redaction import generate_synthetic_test_video
 
-    generate_synthetic_test_video(str(video_path), duration_sec=5, fps=30)
-    return video_path
+    generate_synthetic_test_video(str(fallback_path), duration_sec=5, fps=30)
+    return fallback_path

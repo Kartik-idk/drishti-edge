@@ -377,6 +377,26 @@ class TestStreamlitAppTestIntegration(unittest.TestCase):
         has_max_slider = any("Max Frames to Audit" in s.label for s in at.slider)
         self.assertFalse(has_max_slider, "Max Frames slider should be hidden in Full-Video Audit mode")
 
+    def test_apptest_public_demo_source_and_restrictions(self):
+        """In public demo mode, canonical demonstration video is configured and uploads are absent."""
+        from streamlit.testing.v1 import AppTest
+
+        app_path = str(PROJECT_ROOT / "app.py")
+        at = AppTest.from_file(app_path, default_timeout=30)
+        at.run()
+
+        self.assertEqual(len(at.exception), 0, f"App mounted with exceptions: {at.exception}")
+
+        # Verify no file_uploader widgets exist
+        self.assertEqual(len(at.file_uploader), 0, "File uploader must not be present in public demo mode")
+
+        # Verify india_street_demo.mp4 is mounted as the built-in source
+        markdown_texts = [m.value for m in at.sidebar.markdown]
+        self.assertTrue(
+            any("india_street_demo.mp4" in text for text in markdown_texts),
+            "india_street_demo.mp4 must be displayed as the demonstration video source in sidebar",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

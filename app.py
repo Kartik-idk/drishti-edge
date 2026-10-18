@@ -343,12 +343,13 @@ if IS_PUBLIC_DEMO:
     selected_name = demo_video_path.name
 
     st.sidebar.markdown(
-        """
+        f"""
         <div style="background-color: #111C2E; border: 1px solid #29374B; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem;">
             <div style="font-size: 0.72rem; color: #2DD4BF; font-weight: 700; text-transform: uppercase; margin-bottom: 0.25rem;">Built-in Demonstration Source</div>
-            <div style="font-size: 0.92rem; font-weight: 700; color: #E5EDF7;">synthetic_test.mp4</div>
+            <div style="font-size: 0.92rem; font-weight: 700; color: #E5EDF7;">{selected_name}</div>
             <div style="font-size: 0.74rem; color: #9AAEC4; margin-top: 0.25rem; line-height: 1.4;">
-                Procedural 720p simulation (150 frames, 5.0s @ 30 FPS). Verified synthetic sample free of PII and copyright constraints.
+                Indian street corridor demonstration footage (240 frames, 8.0s @ 30 FPS, Pexels licensed).
+                Processed ephemerally on the hosted cloud server with solid privacy redaction.
             </div>
         </div>
         """,

@@ -99,11 +99,19 @@ class TestModelDownloader(unittest.TestCase):
             self.assertEqual(len(tmp_files), 0, "Temporary staging files must be cleaned up")
 
     def test_ensure_demo_video_available(self):
-        """Synthetic demonstration video must exist or be generated successfully."""
+        """Canonical demonstration video must exist and match canonical filename."""
         vid_path = ensure_demo_video_available(PROJECT_ROOT)
         self.assertTrue(vid_path.is_file())
         self.assertGreater(vid_path.stat().st_size, 0)
         self.assertEqual(vid_path.name, CANONICAL_DEMO_VIDEO["filename"])
+
+    def test_ensure_demo_video_fallback(self):
+        """When canonical demo video is absent in a custom root, synthetic fallback is generated."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            vid_path = ensure_demo_video_available(tmp_root)
+            self.assertTrue(vid_path.is_file())
+            self.assertEqual(vid_path.name, "synthetic_test.mp4")
 
 
 if __name__ == "__main__":

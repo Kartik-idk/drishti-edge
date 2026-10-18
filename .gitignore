@@ -65,8 +65,9 @@ logs/
 # Data directories (keep directory structure via .gitkeep)
 data/videos/*
 !data/videos/.gitkeep
-# Allow built-in demonstration synthetic video (100% procedurally generated, zero PII)
+# Allow built-in demonstration videos
 !data/videos/synthetic_test.mp4
+!data/videos/india_street_demo.mp4
 data/raw_videos/*
 !data/raw_videos/.gitkeep
 data/output/*
