@@ -1185,8 +1185,176 @@ class TestPhase054TargetedPrivacyLeakCorrection(unittest.TestCase):
         self.assertTrue(np.all(redacted_red == 0), "Whole frame must be blacked out under redaction exception")
 
 
+class TestFalsePositivePlateFallbackRegression(unittest.TestCase):
+    """Deterministic regression tests verifying that false-positive plate detections
+
+    on distractor regions (advertisements, stickers, spare wheel covers, cargo text)
+    do NOT suppress vehicle fallback masks, ensuring real registration plates remain
+    fully protected with solid opaque black pixels.
+    """
+
+    def setUp(self):
+        self.engine = ConsolidatedPrivacyEngine(device="cpu")
+        self.frame_w = CANONICAL_WIDTH
+        self.frame_h = CANONICAL_HEIGHT
+
+    def test_false_positive_distractor_plate_does_not_suppress_vehicle_fallback(self):
+        """Simulate India street demo frame 150: e-rickshaw with advertisement sticker
+
+        on spare-wheel cover. Distractor plate must NOT suppress the vehicle fallback,
+        and the actual registration plate must be 100% covered by opaque black pixels.
+        """
+        # Vehicle bounding box (e-rickshaw, class 7 truck/3W):
+        # Coordinates: vx1=744, vy1=193, vx2=1261, vy2=693, cls_id=7 (w=517, h=500, aspect=1.034)
+        v_box = (744, 193, 1261, 693, 7)
+
+        # Distractor plate detection: advertisement sticker on spare wheel
+        # px1=1109, py1=411, px2=1190, py2=450, conf=0.41 (located in mid-body, 43% down)
+        distractor_det = (1109, 411, 1190, 450, 0.41)
+
+        # Actual vehicle registration plate region on lower chassis
+        # px1=1119, py1=534, px2=1150, py2=564 (w=31, h=30)
+        expected_plate = (1119, 534, 1150, 564)
+
+        # 1. Fallback determination: distractor detection must NOT suppress fallback
+        fallbacks = self.engine.compute_vehicle_fallbacks(
+            [v_box], direct_plate_boxes=[distractor_det], active_temporal_holds=[]
+        )
+        self.assertEqual(
+            len(fallbacks),
+            1,
+            "Vehicle fallback must NOT be suppressed by mid-body distractor plate detection",
+        )
+        fb_x1, fb_y1, fb_x2, fb_y2 = fallbacks[0]
+
+        # Verify fallback encompasses the expected plate region
+        exp_x1, exp_y1, exp_x2, exp_y2 = expected_plate
+        self.assertLessEqual(fb_x1, exp_x1, "Fallback x1 must cover expected plate left edge")
+        self.assertLessEqual(fb_y1, exp_y1, "Fallback y1 must cover expected plate top edge")
+        self.assertGreaterEqual(fb_x2, exp_x2, "Fallback x2 must cover expected plate right edge")
+        self.assertGreaterEqual(fb_y2, exp_y2, "Fallback y2 must cover expected plate bottom edge")
+
+        # 2. Pixel-level redaction verification in end-to-end process_frame pipeline
+        test_frame = np.full((self.frame_h, self.frame_w, 3), 180, dtype=np.uint8)
+        # Give the actual plate region a distinctive bright color (e.g. green Delhi EV plate)
+        test_frame[exp_y1:exp_y2, exp_x1:exp_x2] = [0, 255, 0]
+        # Give the distractor sticker a distinctive color (e.g. red advertisement)
+        test_frame[411:450, 1109:1190] = [0, 0, 255]
+
+        from unittest.mock import patch
+
+        with patch.object(self.engine, "detect_faces", return_value=([], 1.0)), \
+             patch.object(self.engine, "detect_context_and_extract_crops", return_value=([None], [v_box], [], [], 2.0, 1.0)), \
+             patch.object(self.engine, "detect_plates_batched", return_value=([distractor_det], None, 2.0, 1.0)):
+            redacted, status, metrics = self.engine.process_frame(test_frame)
+
+        # Gate status must be approved
+        self.assertEqual(status, PrivacyGateStatus.RELEASE_APPROVED)
+        self.assertEqual(metrics["plate_count"], 1)
+        self.assertEqual(metrics["plate_fallbacks_count"], 1)
+
+        # Verify center pixel of expected plate is opaque black [0, 0, 0]
+        center_x = (exp_x1 + exp_x2) // 2
+        center_y = (exp_y1 + exp_y2) // 2
+        np.testing.assert_array_equal(
+            redacted[center_y, center_x],
+            [0, 0, 0],
+            err_msg="Center pixel of expected plate region must be solid opaque black",
+        )
+
+        # Verify ALL interior pixels of expected plate region are opaque black [0, 0, 0]
+        plate_pixels = redacted[exp_y1:exp_y2, exp_x1:exp_x2]
+        black_pixels = np.sum(np.all(plate_pixels == [0, 0, 0], axis=-1))
+        total_pixels = (exp_x2 - exp_x1) * (exp_y2 - exp_y1)
+        self.assertEqual(
+            black_pixels,
+            total_pixels,
+            f"Expected plate must be 100% blacked out ({black_pixels}/{total_pixels} pixels masked)",
+        )
+
+        # Verify distractor region itself is ALSO masked (both regions masked)
+        distractor_pixels = redacted[411:450, 1109:1190]
+        distractor_black = np.sum(np.all(distractor_pixels == [0, 0, 0], axis=-1))
+        distractor_total = (1190 - 1109) * (450 - 411)
+        self.assertEqual(
+            distractor_black,
+            distractor_total,
+            "Distractor sticker region must also be masked by direct detection mask",
+        )
+
+        # 3. Old suppression behavior regression sensitivity check:
+        # Demonstrate that if the old suppression logic returned (i.e. fallbacks = []),
+        # the expected plate would remain completely unmasked and exposed.
+        with patch.object(self.engine, "detect_faces", return_value=([], 1.0)), \
+             patch.object(self.engine, "detect_context_and_extract_crops", return_value=([None], [v_box], [], [], 2.0, 1.0)), \
+             patch.object(self.engine, "detect_plates_batched", return_value=([distractor_det], None, 2.0, 1.0)), \
+             patch.object(self.engine, "compute_vehicle_fallbacks", return_value=[]):
+            old_redacted, old_status, _ = self.engine.process_frame(test_frame)
+
+        # Status would still be RELEASE_APPROVED, but plate is entirely exposed (0% black)
+        self.assertEqual(old_status, PrivacyGateStatus.RELEASE_APPROVED)
+        old_plate_pixels = old_redacted[exp_y1:exp_y2, exp_x1:exp_x2]
+        old_black_pixels = np.sum(np.all(old_plate_pixels == [0, 0, 0], axis=-1))
+        self.assertEqual(
+            old_black_pixels,
+            0,
+            "Under old suppression behavior, real plate was 0% masked (confirming test sensitivity)",
+        )
+
+    def test_four_wheeler_upper_body_distractor_does_not_suppress_bumper_fallback(self):
+        """Standard 4-wheeler (delivery truck or car) with advertisement text on rear
+
+        window or upper tailgate must NOT suppress the bumper fallback mask.
+        """
+        # Car / Truck: w=400, h=300 (aspect 1.33, class 2)
+        v_box = (200, 200, 600, 500, 2)
+        # Distractor sticker on upper window (y=240..270, well above lower 35% bumper limit of 395)
+        distractor_det = (350, 240, 450, 270, 0.45)
+        # Expected bumper plate location
+        expected_plate = (370, 460, 430, 485)
+
+        fallbacks = self.engine.compute_vehicle_fallbacks(
+            [v_box], direct_plate_boxes=[distractor_det], active_temporal_holds=[]
+        )
+        self.assertEqual(len(fallbacks), 1, "4W bumper fallback must not be suppressed by upper-body distractor")
+
+        fb_x1, fb_y1, fb_x2, fb_y2 = fallbacks[0]
+        exp_x1, exp_y1, exp_x2, exp_y2 = expected_plate
+        self.assertLessEqual(fb_x1, exp_x1)
+        self.assertLessEqual(fb_y1, exp_y1)
+        self.assertGreaterEqual(fb_x2, exp_x2)
+        self.assertGreaterEqual(fb_y2, exp_y2)
+
+        test_frame = np.full((self.frame_h, self.frame_w, 3), 200, dtype=np.uint8)
+        test_frame[exp_y1:exp_y2, exp_x1:exp_x2] = [255, 255, 255]
+
+        redacted, _ = apply_solid_masks_independent(test_frame, fallbacks + [distractor_det[:4]], color=(0, 0, 0))
+        plate_pixels = redacted[exp_y1:exp_y2, exp_x1:exp_x2]
+        self.assertTrue(np.all(plate_pixels == [0, 0, 0]), "Expected plate must be 100% blacked out")
+
+    def test_fallback_suppressed_only_by_confident_and_coincident_plate(self):
+        """Verify that fallback IS suppressed when and only when a genuine, confident
+
+        (score >= 0.65) plate candidate is detected in the plausible bumper fallback zone.
+        """
+        # Vehicle: w=400, h=300, y=200..500
+        v_box = (200, 200, 600, 500, 2)
+
+        # Case 1: Low-confidence detection (score=0.40) inside bumper zone -> does NOT suppress
+        low_conf = (370, 440, 430, 470, 0.40)
+        fb_1 = self.engine.compute_vehicle_fallbacks([v_box], direct_plate_boxes=[low_conf], active_temporal_holds=[])
+        self.assertEqual(len(fb_1), 1, "Low-confidence plate must not suppress fallback")
+
+        # Case 2: High-confidence detection (score=0.85) situated on upper body -> does NOT suppress
+        upper_det = (370, 250, 430, 280, 0.85)
+        fb_2 = self.engine.compute_vehicle_fallbacks([v_box], direct_plate_boxes=[upper_det], active_temporal_holds=[])
+        self.assertEqual(len(fb_2), 1, "Upper-body plate must not suppress bumper fallback")
+
+        # Case 3: High-confidence detection (score=0.85) inside bumper zone -> DOES suppress
+        valid_det = (370, 440, 430, 470, 0.85)
+        fb_3 = self.engine.compute_vehicle_fallbacks([v_box], direct_plate_boxes=[valid_det], active_temporal_holds=[])
+        self.assertEqual(len(fb_3), 0, "High-confidence bumper plate must suppress redundant fallback")
+
+
 if __name__ == "__main__":
     unittest.main()
-
-
-

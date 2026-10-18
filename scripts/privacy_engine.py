@@ -667,21 +667,29 @@ class ConsolidatedPrivacyEngine:
 
             is_2w3w = (
                 cls_id == 3
-                or (cls_id is not None and cls_id in {1, 2, 7} and vw / max(1, vh) <= 0.85)
+                or (cls_id is not None and cls_id in {1, 2, 7} and vw / max(1, vh) <= 1.15)
             )
             needs_fallback = False
             if not deduped:
                 needs_fallback = True
-            elif is_2w3w:
-                # For 2W/3W, verify candidate is adequate and not a partial/false plate
+            else:
                 has_adequate = False
                 for px1, py1, px2, py2, sc in deduped:
                     cw = px2 - px1
                     ch = py2 - py1
-                    if (cw >= 14 or cw >= 0.35 * vw) and ch >= 6:
-                        if py2 >= crop_h - max(12, int(round(0.18 * vh))):
+                    # Uncertain detections or tiny slivers cannot prove plate protection
+                    if sc < 0.65 or cw < 14 or ch < 6:
+                        continue
+                    # Must reach into plausible lower bumper/tail zone (lower 35%)
+                    if py2 < crop_h - max(12, int(round(0.35 * vh))):
+                        continue
+                    if is_2w3w:
+                        if (cw >= 14 or cw >= 0.35 * vw) and py2 >= crop_h - max(12, int(round(0.18 * vh))):
                             has_adequate = True
                             break
+                    else:
+                        has_adequate = True
+                        break
                 if not has_adequate:
                     needs_fallback = True
 
@@ -771,21 +779,29 @@ class ConsolidatedPrivacyEngine:
 
             is_2w3w = (
                 cls_id == 3
-                or (cls_id is not None and cls_id in {1, 2, 7} and vw / max(1, vh) <= 0.85)
+                or (cls_id is not None and cls_id in {1, 2, 7} and vw / max(1, vh) <= 1.15)
             )
             needs_fallback = False
             if not deduped:
                 needs_fallback = True
-            elif is_2w3w:
-                # For 2W/3W, verify candidate is adequate and not a partial/false plate
+            else:
                 has_adequate = False
                 for px1, py1, px2, py2, sc in deduped:
                     cw = px2 - px1
                     ch = py2 - py1
-                    if (cw >= 14 or cw >= 0.35 * vw) and ch >= 6:
-                        if py2 >= crop_h - max(12, int(round(0.18 * vh))):
+                    # Uncertain detections or tiny slivers cannot prove plate protection
+                    if sc < 0.65 or cw < 14 or ch < 6:
+                        continue
+                    # Must reach into plausible lower bumper/tail zone (lower 35%)
+                    if py2 < crop_h - max(12, int(round(0.35 * vh))):
+                        continue
+                    if is_2w3w:
+                        if (cw >= 14 or cw >= 0.35 * vw) and py2 >= crop_h - max(12, int(round(0.18 * vh))):
                             has_adequate = True
                             break
+                    else:
+                        has_adequate = True
+                        break
                 if not has_adequate:
                     needs_fallback = True
 
@@ -864,7 +880,7 @@ class ConsolidatedPrivacyEngine:
         if self.localized_fallbacks:
             is_two_or_three_wheeler = (
                 cls_id == 3
-                or (cls_id is not None and cls_id in {1, 2, 7} and vw / max(1, vh) <= 0.85)
+                or (cls_id is not None and cls_id in {1, 2, 7} and vw / max(1, vh) <= 1.15)
             )
             if is_two_or_three_wheeler:
                 # Two-/three-wheeler fallback: lower 80% of vehicle box, full vehicle width
@@ -906,24 +922,54 @@ class ConsolidatedPrivacyEngine:
 
             is_2w3w = (
                 cls_id == 3
-                or (cls_id is not None and cls_id in {1, 2, 7} and vw / max(1, vh) <= 0.85)
+                or (cls_id is not None and cls_id in {1, 2, 7} and vw / max(1, vh) <= 1.15)
             )
+
+            fb = self._compute_single_vehicle_fallback(vx1, vy1, vx2, vy2, cls_id=cls_id)
+            fb_x1, fb_y1, fb_x2, fb_y2 = fb
 
             vehicle_has_direct_plate = False
             for p in direct_plate_boxes:
                 px1, py1, px2, py2 = p[:4]
+                p_conf = p[4] if len(p) > 4 else 1.0
                 pcx = (px1 + px2) / 2.0
                 pcy = (py1 + py2) / 2.0
-                if (vx1 <= pcx <= vx2) and (vy1 <= pcy <= vy2):
-                    if is_2w3w:
-                        pw = px2 - px1
-                        ph = py2 - py1
-                        if (pw >= 14 or pw >= 0.35 * vw) and ph >= 6 and py2 >= vy2 - max(12, int(round(0.18 * vh))):
-                            vehicle_has_direct_plate = True
-                            break
-                    else:
+
+                # 1. Plate center must lie inside vehicle bounding box
+                if not ((vx1 <= pcx <= vx2) and (vy1 <= pcy <= vy2)):
+                    continue
+
+                # 2. Plate detection must be sufficiently confident (avoid distractor/sticker hits)
+                if p_conf < 0.65:
+                    continue
+
+                # 3. Minimum dimensions (avoid tiny slivers/seams)
+                pw = px2 - px1
+                ph = py2 - py1
+                if pw < 14 or ph < 6:
+                    continue
+
+                # 4. Spatial consistency: plate must reach into plausible lower bumper/tail zone (lower 35%)
+                bumper_top_limit = vy2 - max(12, int(round(0.35 * vh)))
+                if py2 < bumper_top_limit or pcy < (vy1 + 0.40 * vh):
+                    continue
+
+                # 5. Plate must physically intersect the expected fallback region
+                ix1 = max(px1, fb_x1)
+                iy1 = max(py1, fb_y1)
+                ix2 = min(px2, fb_x2)
+                iy2 = min(py2, fb_y2)
+                if ix2 <= ix1 or iy2 <= iy1:
+                    continue
+
+                # 6. For 2W/3W vehicles, verify it reaches tail/mudguard boundary
+                if is_2w3w:
+                    if (pw >= 14 or pw >= 0.35 * vw) and ph >= 6 and py2 >= vy2 - max(12, int(round(0.18 * vh))):
                         vehicle_has_direct_plate = True
                         break
+                else:
+                    vehicle_has_direct_plate = True
+                    break
 
             vehicle_has_temporal_plate = False
             if not vehicle_has_direct_plate and not is_2w3w:
@@ -937,7 +983,6 @@ class ConsolidatedPrivacyEngine:
                         break
 
             if not vehicle_has_direct_plate and not vehicle_has_temporal_plate:
-                fb = self._compute_single_vehicle_fallback(vx1, vy1, vx2, vy2, cls_id=cls_id)
                 fallbacks.append(fb)
         return fallbacks
 
