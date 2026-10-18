@@ -38,6 +38,10 @@ import scripts.spatial_zone_mapper
 if not hasattr(scripts.spatial_zone_mapper, "calculate_expected_evaluated_frames"):
     importlib.reload(scripts.spatial_zone_mapper)
 
+from scripts.model_downloader import (
+    ensure_demo_video_available,
+    ensure_models_available,
+)
 from scripts.privacy_engine import (
     CANONICAL_HEIGHT,
     CANONICAL_WIDTH,
@@ -53,8 +57,14 @@ from scripts.spatial_zone_mapper import (
     discover_local_videos,
     get_video_metadata,
 )
+import torch
 
 VIDEO_DIR = PROJECT_ROOT / "data" / "videos"
+
+# Deployment Mode Configuration:
+# On hosted demonstration deployments (e.g., Streamlit Community Cloud), defaults to True.
+# Can be overridden via DRISHTI_PUBLIC_DEMO environment variable ("0", "false" for local audit mode).
+IS_PUBLIC_DEMO = os.getenv("DRISHTI_PUBLIC_DEMO", "true").lower() in ("true", "1", "yes")
 
 
 # ==============================================================================
@@ -327,19 +337,41 @@ st.sidebar.markdown(
 
 # 1. Video Selection
 st.sidebar.subheader("1. Video Source")
-available_videos = discover_local_videos()
-if not available_videos:
-    st.sidebar.error("No compatible video files found in `data/videos/`.")
-    selected_video_path = None
-    selected_name = "None"
-else:
-    video_options = {v.name: v for v in available_videos}
-    selected_name = st.sidebar.selectbox(
-        "Choose test video from `data/videos/`:",
-        options=list(video_options.keys()),
-        index=0,
+if IS_PUBLIC_DEMO:
+    demo_video_path = ensure_demo_video_available(PROJECT_ROOT)
+    selected_video_path = demo_video_path
+    selected_name = demo_video_path.name
+
+    st.sidebar.markdown(
+        """
+        <div style="background-color: #111C2E; border: 1px solid #29374B; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem;">
+            <div style="font-size: 0.72rem; color: #2DD4BF; font-weight: 700; text-transform: uppercase; margin-bottom: 0.25rem;">Built-in Demonstration Source</div>
+            <div style="font-size: 0.92rem; font-weight: 700; color: #E5EDF7;">synthetic_test.mp4</div>
+            <div style="font-size: 0.74rem; color: #9AAEC4; margin-top: 0.25rem; line-height: 1.4;">
+                Procedural 720p simulation (150 frames, 5.0s @ 30 FPS). Verified synthetic sample free of PII and copyright constraints.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    selected_video_path = video_options[selected_name]
+    st.sidebar.caption(
+        "🔒 **Cloud Security Notice:** User video uploads are disabled on this hosted instance. "
+        "Processing is strictly restricted to built-in demonstration footage."
+    )
+else:
+    available_videos = discover_local_videos()
+    if not available_videos:
+        st.sidebar.error("No compatible video files found in `data/videos/`.")
+        selected_video_path = None
+        selected_name = "None"
+    else:
+        video_options = {v.name: v for v in available_videos}
+        selected_name = st.sidebar.selectbox(
+            "Choose test video from `data/videos/`:",
+            options=list(video_options.keys()),
+            index=0,
+        )
+        selected_video_path = video_options[selected_name]
 
 st.sidebar.markdown("---")
 
@@ -434,25 +466,42 @@ else:
     st.sidebar.markdown("<span class='badge badge-incomplete'>Factor I: Unassessed</span>", unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown(
-    """
-    <div style="font-size: 0.72rem; color: #9AAEC4; line-height: 1.4;">
-        <strong>Privacy Invariant:</strong> Local edge processing only. Raw frames remain in volatile RAM and are never persisted to disk.
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+if IS_PUBLIC_DEMO:
+    st.sidebar.markdown(
+        """
+        <div style="font-size: 0.72rem; color: #9AAEC4; line-height: 1.4;">
+            <strong>Demonstration Architecture:</strong> Processing executes ephemerally on Streamlit Community Cloud server CPU infrastructure.
+            Frames exist only in transient container memory during inference and are never persisted to disk. Zero user video uploads accepted.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    st.sidebar.markdown(
+        """
+        <div style="font-size: 0.72rem; color: #9AAEC4; line-height: 1.4;">
+            <strong>Privacy Invariant:</strong> Local edge processing only. Raw frames remain in volatile RAM and are never persisted to disk.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ==============================================================================
 # Header & Truthful Status Indicators
 # ==============================================================================
 
+brand_subtitle_text = (
+    "Privacy-Preserving Urban Intelligence Console &mdash; Hosted Demonstration"
+    if IS_PUBLIC_DEMO
+    else "Privacy-Preserving Urban Intelligence & Civic Safety Console"
+)
+
 st.markdown(
-    """
+    f"""
     <div class="brand-container">
         <div class="brand-title">DRISHTI-EDGE</div>
-        <div class="brand-subtitle">Privacy-Preserving Urban Intelligence & Civic Safety Console</div>
+        <div class="brand-subtitle">{brand_subtitle_text}</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -489,12 +538,14 @@ if has_audit_run:
 else:
     audit_state_html = "<span class='status-dot status-dot-idle'></span> Status: <strong>Ready to Audit</strong>"
 
+engine_badge_text = "Streamlit Cloud (Hosted CPU)" if IS_PUBLIC_DEMO else "Local Edge (127.0.0.1)"
+
 # Render Horizontal Status Strip
 st.markdown(
     f"""
     <div class="status-strip">
         <div class="status-item">
-            <span class="status-dot status-dot-active"></span> Engine: <strong>Local Edge (127.0.0.1)</strong>
+            <span class="status-dot status-dot-active"></span> Engine: <strong>{engine_badge_text}</strong>
         </div>
         <div style="color: #29374B;">|</div>
         <div class="status-item">
@@ -590,7 +641,33 @@ with tab_overview:
 
     # Pipeline Execution
     if run_processing:
-        engine = ConsolidatedPrivacyEngine()
+        # Check neural network model availability and cryptographic integrity
+        with st.spinner("Verifying neural network model checkpoints..."):
+            model_audit = ensure_models_available(PROJECT_ROOT)
+
+        if not model_audit["all_available"]:
+            err_details = [
+                f"• {m['name']} ({m['filename']}): {m['error']}"
+                for m in model_audit["models"].values()
+                if not m["available"]
+            ]
+            st.error(
+                "❌ **Pipeline Fault: Model Integrity Gate Failure**\n\n"
+                "In accordance with fail-closed privacy guarantees, audits cannot execute without verified detector weights.\n\n"
+                + "\n".join(err_details)
+            )
+            st.stop()
+
+        face_model = str(model_audit["models"]["face"]["path"])
+        vehicle_model = str(model_audit["models"]["vehicle"]["path"])
+        plate_model = str(model_audit["models"]["plate"]["path"])
+
+        engine = ConsolidatedPrivacyEngine(
+            face_model_path=face_model,
+            vehicle_model_path=vehicle_model,
+            plate_model_path=plate_model,
+            device="cpu" if IS_PUBLIC_DEMO else ("mps" if torch.backends.mps.is_available() else "cpu"),
+        )
         zone_mapper = SpatialZoneMapper()
 
         cap = cv2.VideoCapture(str(selected_video_path))
@@ -646,12 +723,13 @@ with tab_overview:
                     rgb_redacted = cv2.cvtColor(redacted_frame, cv2.COLOR_BGR2RGB)
                     rgb_diag = cv2.cvtColor(diag_vis, cv2.COLOR_BGR2RGB)
                     rgb_spatial = cv2.cvtColor(spatial_vis, cv2.COLOR_BGR2RGB)
-                    rgb_source = cv2.cvtColor(canonical_input, cv2.COLOR_BGR2RGB)
 
                     last_redacted = rgb_redacted
                     last_diag = rgb_diag
                     last_spatial = rgb_spatial
-                    last_source = rgb_source
+                    if not IS_PUBLIC_DEMO:
+                        rgb_source = cv2.cvtColor(canonical_input, cv2.COLOR_BGR2RGB)
+                        last_source = rgb_source
                     last_metrics = metrics
 
                     progress = min(1.0, evaluated_count / max(1, total_to_evaluate))
@@ -699,7 +777,8 @@ with tab_overview:
         st.session_state["last_redacted"] = last_redacted
         st.session_state["last_diag"] = last_diag
         st.session_state["last_spatial"] = last_spatial
-        st.session_state["last_source"] = last_source
+        if not IS_PUBLIC_DEMO:
+            st.session_state["last_source"] = last_source
 
     # C. Run Summary or Empty State
     if "zone_mapper" in st.session_state:
@@ -748,20 +827,27 @@ with tab_overview:
                 unsafe_allow_html=True,
             )
     else:
-        # Designed Empty State Container
+        prompt_instruction = (
+            "Select audit parameters in the sidebar and click <strong>Run Privacy Audit</strong> to execute demonstration inference on the built-in sample footage."
+            if IS_PUBLIC_DEMO
+            else "Select audit parameters above and click <strong>Run Privacy Audit</strong> to trigger local edge inference."
+        )
+        engine_infra_text = "Hosted Cloud Inference" if IS_PUBLIC_DEMO else "Local-Only Inference"
+        ram_lifecycle_text = "Ephemeral Container RAM" if IS_PUBLIC_DEMO else "Ephemeral RAM Lifecycles"
+
         st.markdown(
-            """
+            f"""
             <div class="empty-state">
                 <div class="empty-state-title">Console Ready: No Active Audit Run</div>
                 <div class="empty-state-desc">
-                    Select audit parameters above and click <strong>Run Privacy Audit</strong> to trigger local edge inference.
+                    {prompt_instruction}
                     Video frames will be processed through the hardened privacy engine, mapped across the 3×3 spatial grid,
                     and evaluated for environmental lighting and mobility vulnerability.
                 </div>
                 <div style="display: flex; justify-content: center; gap: 1.5rem; font-size: 0.8rem; color: #9AAEC4;">
                     <div>🛡️ <strong>Opaque Non-Reversible Masking</strong></div>
-                    <div>⚡ <strong>Local-Only Inference</strong></div>
-                    <div>🔒 <strong>Ephemeral RAM Lifecycles</strong></div>
+                    <div>⚡ <strong>{engine_infra_text}</strong></div>
+                    <div>🔒 <strong>{ram_lifecycle_text}</strong></div>
                 </div>
             </div>
             """,
@@ -777,7 +863,7 @@ with tab_privacy:
     if "zone_mapper" in st.session_state and st.session_state.get("last_redacted") is not None:
         last_redacted = st.session_state["last_redacted"]
         last_diag = st.session_state["last_diag"]
-        last_source = st.session_state["last_source"]
+        last_source = st.session_state.get("last_source", None)
 
         col_prev1, col_prev2 = st.columns([1.6, 1.0])
 
@@ -840,35 +926,58 @@ with tab_privacy:
                     unsafe_allow_html=True,
                 )
 
-        # Auditor-Only Opt-In Unredacted Source View
-        with st.container(border=True):
-            st.markdown('<div class="console-card-title">👁️ Local Auditor Source Reference (Restricted Inspection)</div>', unsafe_allow_html=True)
-
-        st.markdown(
-            """
-            <div class="auditor-warning">
-                <div class="auditor-warning-title">⚠️ Mandatory Privacy Notice: Ephemeral Unredacted Data</div>
-                <div class="auditor-warning-body">
-                    The unredacted source frame contains Personally Identifiable Information (identifiable faces and vehicle
-                    registration marks). It is retained exclusively in volatile RAM during local execution and is never saved
-                    to disk or transmitted over the network. Access is restricted to authorized auditing review.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        reveal_source = st.checkbox(
-            "Reveal Unredacted Source Frame (Authorized Auditor Only)",
-            value=False,
-            help="Check to inspect the transient unredacted source frame in volatile RAM.",
-        )
-
-        if reveal_source:
-            st.image(last_source, use_container_width=True)
-            st.caption("Ephemeral source frame rendered from volatile memory. Strictly prohibited from export or recording.")
+        # Source Frame Exposure Policy
+        if IS_PUBLIC_DEMO:
+            with st.container(border=True):
+                st.markdown('<div class="console-card-title">🔒 Source Frame Exposure Policy (Hosted Demo)</div>', unsafe_allow_html=True)
+                st.markdown(
+                    """
+                    <div style="background-color: rgba(45, 212, 191, 0.08); border: 1px solid #2DD4BF; border-radius: 6px; padding: 0.85rem 1.1rem;">
+                        <div style="color: #2DD4BF; font-weight: 700; font-size: 0.85rem; margin-bottom: 0.3rem;">
+                            ✓ Unredacted Source Frame Disclosure Permanently Disabled
+                        </div>
+                        <div style="color: #E5EDF7; font-size: 0.82rem; line-height: 1.5;">
+                            In accordance with strict Privacy-by-Design invariants for public hosted deployments, raw unredacted
+                            source-frame inspection is permanently disabled. Only opaque redacted frames and diagnostic provenance
+                            overlays are exposed. Raw frames remain strictly ephemeral in server container memory during inference
+                            and are discarded immediately without disk persistence or public network transmission.
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
         else:
-            st.info("Unredacted source frame is masked by default in accordance with Privacy-by-Design invariants.")
+            with st.container(border=True):
+                st.markdown('<div class="console-card-title">👁️ Local Auditor Source Reference (Restricted Inspection)</div>', unsafe_allow_html=True)
+
+            st.markdown(
+                """
+                <div class="auditor-warning">
+                    <div class="auditor-warning-title">⚠️ Mandatory Privacy Notice: Ephemeral Unredacted Data</div>
+                    <div class="auditor-warning-body">
+                        The unredacted source frame contains Personally Identifiable Information (identifiable faces and vehicle
+                        registration marks). It is retained exclusively in volatile RAM during local execution and is never saved
+                        to disk or transmitted over the network. Access is restricted to authorized auditing review.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            reveal_source = st.checkbox(
+                "Reveal Unredacted Source Frame (Authorized Auditor Only)",
+                value=False,
+                help="Check to inspect the transient unredacted source frame in volatile RAM.",
+            )
+
+            if reveal_source:
+                if last_source is not None:
+                    st.image(last_source, use_container_width=True)
+                    st.caption("Ephemeral source frame rendered from volatile memory. Strictly prohibited from export or recording.")
+                else:
+                    st.info("No transient source frame buffer available in session memory.")
+            else:
+                st.info("Unredacted source frame is masked by default in accordance with Privacy-by-Design invariants.")
 
     else:
         st.markdown(

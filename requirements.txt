@@ -1,9 +1,10 @@
-# Core Dependencies for Drishti-Edge
+# Core Dependencies for Drishti-Edge (Hosted Demonstration Deployment)
 # Seva First Innovation Challenge
 
-# Computer Vision and Edge Inference
-opencv-python>=4.8.0
+# Computer Vision and Edge Inference (Headless for Linux Cloud Compatibility)
+opencv-python-headless>=4.8.0
 ultralytics>=8.0.0
+torch>=2.0.0
 
 # User Interface and Interactive Dashboard
 streamlit>=1.30.0
