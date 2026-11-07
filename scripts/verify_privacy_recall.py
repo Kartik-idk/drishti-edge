@@ -18,12 +18,14 @@ Usage:
   python scripts/verify_privacy_recall.py --calculate-metrics
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import gc
 import os
 import sys
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
