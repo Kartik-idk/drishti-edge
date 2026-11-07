@@ -15,6 +15,7 @@ Tests:
 
 import unittest
 from pathlib import Path
+import cv2
 import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -229,22 +230,38 @@ class TestPhase06ZoneAndZVI(unittest.TestCase):
         from scripts.spatial_zone_mapper import discover_local_videos, get_video_metadata
 
         videos = discover_local_videos()
-        self.assertTrue(len(videos) > 0, "Should discover at least one video in data/videos/")
+        temp_dir = None
+        if len(videos) == 0:
+            import tempfile
+            temp_dir = tempfile.TemporaryDirectory()
+            temp_video = Path(temp_dir.name) / "test_synth_video.mp4"
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            vw = cv2.VideoWriter(str(temp_video), fourcc, 10.0, (320, 240))
+            vw.write(np.zeros((240, 320, 3), dtype=np.uint8))
+            vw.write(np.zeros((240, 320, 3), dtype=np.uint8))
+            vw.release()
+            videos = discover_local_videos(Path(temp_dir.name))
 
-        # Test valid metadata extraction
-        sample_video = videos[0]
-        meta = get_video_metadata(sample_video)
-        self.assertIsNotNone(meta)
-        self.assertIn("filename", meta)
-        self.assertIn("width", meta)
-        self.assertIn("height", meta)
-        self.assertIn("fps", meta)
-        self.assertGreater(meta["width"], 0)
-        self.assertGreater(meta["height"], 0)
+        try:
+            self.assertTrue(len(videos) > 0, "Should discover at least one video in data/videos/")
 
-        # Test invalid/non-existent video handling
-        non_existent = Path("data/videos/does_not_exist_12345.mp4")
-        self.assertIsNone(get_video_metadata(non_existent))
+            # Test valid metadata extraction
+            sample_video = videos[0]
+            meta = get_video_metadata(sample_video)
+            self.assertIsNotNone(meta)
+            self.assertIn("filename", meta)
+            self.assertIn("width", meta)
+            self.assertIn("height", meta)
+            self.assertIn("fps", meta)
+            self.assertGreater(meta["width"], 0)
+            self.assertGreater(meta["height"], 0)
+
+            # Test invalid/non-existent video handling
+            non_existent = Path("data/videos/does_not_exist_12345.mp4")
+            self.assertIsNone(get_video_metadata(non_existent))
+        finally:
+            if temp_dir is not None:
+                temp_dir.cleanup()
 
 
 if __name__ == "__main__":

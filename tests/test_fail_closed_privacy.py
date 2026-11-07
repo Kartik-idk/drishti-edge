@@ -33,6 +33,37 @@ from scripts.privacy_engine import (
 )
 
 
+class DummyFaceDetector:
+    def setInputSize(self, size):
+        pass
+
+    def detect(self, frame):
+        return True, None
+
+
+class DummyYOLOResult:
+    def __init__(self):
+        self.boxes = []
+
+
+class DummyYOLO:
+    def __call__(self, *args, **kwargs):
+        return [DummyYOLOResult()]
+
+
+def create_test_engine(**kwargs):
+    """Provide explicit, safe test configuration for CI when real model weights are absent."""
+    kwargs.setdefault("device", "cpu")
+    engine = ConsolidatedPrivacyEngine(**kwargs)
+    if "face_model_path" not in kwargs and engine.face_detector is None:
+        engine.face_detector = DummyFaceDetector()
+    if "vehicle_model_path" not in kwargs and engine.vehicle_detector is None:
+        engine.vehicle_detector = DummyYOLO()
+    if "plate_model_path" not in kwargs and engine.plate_detector is None:
+        engine.plate_detector = DummyYOLO()
+    return engine
+
+
 class TestPrivacyHardeningAndSafety(unittest.TestCase):
     def setUp(self):
         self.frame_w = CANONICAL_WIDTH
@@ -145,7 +176,7 @@ class TestPrivacyHardeningAndSafety(unittest.TestCase):
 
     def test_canonical_720p_output_from_4k_input(self):
         """Input of 3840x2160 must produce canonical 1280x720 output."""
-        engine = ConsolidatedPrivacyEngine(device="cpu")
+        engine = create_test_engine(device="cpu")
         frame_4k = np.full((2160, 3840, 3), 120, dtype=np.uint8)
 
         output, status, metrics = engine.process_frame(frame_4k)
@@ -157,7 +188,7 @@ class TestPrivacyHardeningAndSafety(unittest.TestCase):
 
     def test_canonical_720p_output_from_720p_input(self):
         """Input already at 1280x720 must produce 1280x720 output."""
-        engine = ConsolidatedPrivacyEngine(device="cpu")
+        engine = create_test_engine(device="cpu")
         frame_720 = np.full((CANONICAL_HEIGHT, CANONICAL_WIDTH, 3), 150, dtype=np.uint8)
 
         output, status, metrics = engine.process_frame(frame_720)
@@ -235,7 +266,7 @@ class TestPrivacyHardeningAndSafety(unittest.TestCase):
 
     def test_fail_closed_on_detector_exception(self):
         """Injected detector exception must emit a solid black 1280x720 suppression frame."""
-        engine = ConsolidatedPrivacyEngine(device="cpu")
+        engine = create_test_engine(device="cpu")
         raw_frame = np.full((CANONICAL_HEIGHT, CANONICAL_WIDTH, 3), 180, dtype=np.uint8)
 
         output, status, metrics = engine.process_frame(raw_frame, simulate_detector_exception=True)
@@ -251,7 +282,7 @@ class TestPrivacyHardeningAndSafety(unittest.TestCase):
 
     def test_fail_closed_on_redaction_exception(self):
         """Injected redaction exception must emit a solid black 1280x720 suppression frame."""
-        engine = ConsolidatedPrivacyEngine(device="cpu")
+        engine = create_test_engine(device="cpu")
         raw_frame = np.full((CANONICAL_HEIGHT, CANONICAL_WIDTH, 3), 180, dtype=np.uint8)
 
         output, status, metrics = engine.process_frame(raw_frame, simulate_redaction_exception=True)
@@ -275,7 +306,7 @@ class TestPrivacyHardeningAndSafety(unittest.TestCase):
 
     def test_clean_release_when_no_privacy_targets(self):
         """A blank frame with zero faces and zero vehicles completes cleanly with RELEASE_APPROVED."""
-        engine = ConsolidatedPrivacyEngine(device="cpu")
+        engine = create_test_engine(device="cpu")
         blank_frame = np.zeros((CANONICAL_HEIGHT, CANONICAL_WIDTH, 3), dtype=np.uint8)
 
         output, status, metrics = engine.process_frame(blank_frame)
@@ -402,7 +433,7 @@ class TestPhase05PrecisionAndDiagnosticsRegression(unittest.TestCase):
 
     def test_06_provenance_diagnostic_identifies_source_of_each_mask(self):
         """6. The provenance diagnostic identifies the exact source of each mask."""
-        engine = ConsolidatedPrivacyEngine(device="cpu")
+        engine = create_test_engine(device="cpu")
         frame = np.full((CANONICAL_HEIGHT, CANONICAL_WIDTH, 3), 100, dtype=np.uint8)
 
         # Process a frame
@@ -484,7 +515,7 @@ class TestPhase05PrecisionAndDiagnosticsRegression(unittest.TestCase):
 
     def test_10_detector_errors_produce_black_suppression_frame(self):
         """10. Detector errors produce fail-closed solid black 1280x720 suppression frame."""
-        engine = ConsolidatedPrivacyEngine(device="cpu")
+        engine = create_test_engine(device="cpu")
         frame = np.full((CANONICAL_HEIGHT, CANONICAL_WIDTH, 3), 180, dtype=np.uint8)
 
         output, status, metrics = engine.process_frame(frame, simulate_detector_exception=True)
@@ -511,7 +542,7 @@ class TestPhase05PrecisionAndDiagnosticsRegression(unittest.TestCase):
 
     def test_12_diagnostic_visualization_never_modifies_actual_redacted_output(self):
         """12. Diagnostic visualization never modifies the actual redacted output array."""
-        engine = ConsolidatedPrivacyEngine(device="cpu")
+        engine = create_test_engine(device="cpu")
         ref_frame = np.full((CANONICAL_HEIGHT, CANONICAL_WIDTH, 3), 150, dtype=np.uint8)
         redacted_output, gate_status, metrics = engine.process_frame(ref_frame)
 
@@ -1040,7 +1071,7 @@ class TestPhase054TargetedPrivacyLeakCorrection(unittest.TestCase):
     """Phase 0.5.4 regression tests: Targeted two-wheeler & three-wheeler leak prevention."""
 
     def setUp(self):
-        self.engine = ConsolidatedPrivacyEngine(device="cpu")
+        self.engine = create_test_engine(device="cpu")
         self.frame_w = CANONICAL_WIDTH
         self.frame_h = CANONICAL_HEIGHT
 

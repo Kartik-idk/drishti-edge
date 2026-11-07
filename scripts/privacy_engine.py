@@ -376,6 +376,9 @@ class ConsolidatedPrivacyEngine:
         min_vehicle_width: int = 30,
         min_person_height: int = 40,
         localized_fallbacks: bool = True,
+        face_detector: Optional[Any] = None,
+        vehicle_detector: Optional[Any] = None,
+        plate_detector: Optional[Any] = None,
     ):
         self.face_model_path = Path(face_model_path)
         self.vehicle_model_path = Path(vehicle_model_path)
@@ -406,9 +409,9 @@ class ConsolidatedPrivacyEngine:
         )
 
         # Model instances
-        self.face_detector = None
-        self.vehicle_detector = None
-        self.plate_detector = None
+        self.face_detector = face_detector
+        self.vehicle_detector = vehicle_detector
+        self.plate_detector = plate_detector
 
         # Context classes: 0=person, vehicles={2:car, 3:motorcycle, 5:bus, 7:truck}
         self.vehicle_classes = {2, 3, 5, 7}
@@ -424,7 +427,7 @@ class ConsolidatedPrivacyEngine:
     def _init_models(self) -> None:
         """Initialize models and configure multi-threaded OpenCV execution."""
         # 1. Face Detector: OpenCV Zoo YuNet ONNX
-        if self.face_model_path.exists():
+        if self.face_detector is None and self.face_model_path.exists():
             self.face_detector = cv2.FaceDetectorYN.create(
                 model=str(self.face_model_path),
                 config="",
@@ -438,10 +441,10 @@ class ConsolidatedPrivacyEngine:
         # 2. PyTorch / Ultralytics Context & Plate Detectors
         from ultralytics import YOLO
 
-        if self.vehicle_model_path.exists():
+        if self.vehicle_detector is None and self.vehicle_model_path.exists():
             self.vehicle_detector = YOLO(str(self.vehicle_model_path))
 
-        if self.plate_model_path.exists():
+        if self.plate_detector is None and self.plate_model_path.exists():
             self.plate_detector = YOLO(str(self.plate_model_path))
 
         # Explicitly configure OpenCV thread count to verified setting (4 threads)
